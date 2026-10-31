@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="el">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Κάτι μικρό για σένα</title>
+<meta name="description" content="Άνοιξέ το όταν έχεις ένα λεπτό.">
+<meta property="og:title" content="Κάτι μικρό για σένα">
+<meta property="og:description" content="Άνοιξέ το όταν έχεις ένα λεπτό.">
+<meta property="og:image" content="https://gkony21.github.io/for-you/og.png">
+<meta property="og:url" content="https://gkony21.github.io/for-you/">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#050507">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Display:ital,wght@0,300;1,300&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; height: 100%; background: #050507; overflow: hidden; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  #tap { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; color: #F5F0E8; font: 13px/1 ui-monospace, Menlo, monospace; letter-spacing: .25em; cursor: pointer; transition: opacity 1.2s; }
+  #tap .cur { animation: blink 1.1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  #msg { position: fixed; left: 0; right: 0; bottom: max(6vh, calc(env(safe-area-inset-bottom) + 24px)); padding: 0 22px; text-align: center; color: #F5F0E8; font-family: 'Noto Serif Display', Georgia, serif; font-weight: 300; font-size: clamp(18px, 4.8vw, 34px); line-height: 1.35; text-wrap: balance; pointer-events: none; }
+  #msg .w { display: inline-block; white-space: nowrap; }
+  #msg .ch { opacity: 0; filter: blur(4px); transition: opacity .7s ease, filter .7s ease; }
+  #msg .ch.on { opacity: 1; filter: blur(0); }
+  #msg em { font-style: italic; color: #F4A6B8; }
+  #again { position: fixed; right: 10px; top: calc(env(safe-area-inset-top) + 8px); padding: 10px; background: none; border: 0; color: rgba(245,240,232,.4); font: 12px ui-monospace, Menlo, monospace; letter-spacing: .15em; opacity: 0; pointer-events: none; transition: opacity 1.2s; cursor: pointer; }
+  #again.on { opacity: 1; pointer-events: auto; }
+</style>
+</head>
+<body>
+<canvas></canvas>
+<div id="msg"></div>
+<button id="again">↻ ξανά</button>
+<div id="tap">πάτα εδώ<span class="cur">_</span></div>
+<script>
+// The message can be overridden with #m=<base64 utf-8>; *text* is shown in italics.
+const DEFAULT_MSG = 'Σίγουρα σου έχουν πάρει λουλούδια.\nΚανείς όμως δεν σου τα έγραψε *σε κώδικα*.';
+function readMsg() {
+  const m = location.hash.match(/m=([^&]+)/);
+  if (!m) return DEFAULT_MSG;
+  try { return decodeURIComponent(escape(atob(decodeURIComponent(m[1])))); } catch { return DEFAULT_MSG; }
+}
+
+// ---------- palette ----------
+const PAL = [
+  [230, 57, 70],   // 0 red
+  [140, 22, 38],   // 1 red throat
+  [246, 239, 228], // 2 ivory
+  [232, 176, 168], // 3 ivory throat
+  [244, 166, 184], // 4 blush
+  [200, 96, 128],  // 5 blush throat
+  [236, 196, 104], // 6 gold
+  [196, 128, 44],  // 7 gold throat
+  [92, 160, 100],  // 8 stem
+  [118, 188, 108], // 9 leaf
+  [176, 78, 36],   // 10 anther
+  [226, 230, 196], // 11 filament
+  [130, 176, 102], // 12 bud
+];
+const LEVELS = 10;
+const STYLE = PAL.map(([r, g, b]) => Array.from({ length: LEVELS }, (_, i) => {
+  const k = .28 + .9 * i / (LEVELS - 1);
+  return `rgb(${Math.min(255, r * k) | 0},${Math.min(255, g * k) | 0},${Math.min(255, b * k) | 0})`;
+}));
+const RAMP = ':+*xX#%&@';
+
+// ---------- scene ----------
+let seed = 7;
+const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+const COLORS = { R: 0, I: 2, P: 4, G: 6 };
+const FLOWERS = [
+  [0, .6, 0, 'R', .62], [-.58, .32, .22, 'I', .56], [.58, .38, -.16, 'P', .56],
+  [-.16, 1.0, -.3, 'I', .5], [.36, .9, .3, 'G', .48], [-.8, -.12, -.1, 'G', .5],
+  [.84, -.06, .16, 'R', .5], [-.36, -.3, .58, 'P', .5], [.32, -.34, -.58, 'I', .5],
+  [.06, .12, .64, 'R', .52], [-.06, .18, -.68, 'P', .5], [-.48, .8, .36, 'R', .46],
+  [.6, .78, -.42, 'I', .44],
+].map(([x, y, z, c, s0], i) => {
+  const s = s0 * 1.08;
+  x *= 1.18; z *= 1.18; y *= 1.22;
+  const A = norm([x * 1.6, .8 + y * .2, z * 1.6]);
+  const U = norm(cross(A, Math.abs(A[2]) > .9 ? [1, 0, 0] : [0, 0, 1]));
+  const stem = rnd() * .9;
+  return {
+    x, y, z, c: COLORS[c], s, A, U, V: cross(A, U), rot: rnd() * 6.28,
+    stemT: stem, budT: stem + 1.7 + rnd() * .3, bloomT: 3.1 + rnd() * 1.9,
+    leafSide: rnd() * 6.28, leafU: .3 + rnd() * .25, leafLen: .32 + rnd() * .15,
+  };
+});
+const BASE = -1.95;
+const DONE = Math.max(...FLOWERS.map(f => f.bloomT)) + 2.7;
+let builtDone = false;
+const LEAVES = Array.from({ length: 11 }, (_, j) => ({
+  ang: j / 11 * 6.28 + rnd() * .4, len: .75 + rnd() * .5, rise: .75 + rnd() * .35, t0: rnd() * .6,
+}));
+
+function norm(v) { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; }
+function cross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+const clamp01 = v => v < 0 ? 0 : v > 1 ? 1 : v;
+const ease = v => { v = clamp01(v); return v * v * (3 - 2 * v); };
+const hash = (a, b, c) => { const h = Math.sin(a * 127.1 + b * 311.7 + c * 74.7) * 43758.5453; return h - Math.floor(h); };
+
+// Geometry is collected into flat arrays: x,y,z,nx,ny,nz,color,gain,fixedChar
+let G = [], gN = 0;
+function emit(x, y, z, nx, ny, nz, c, k, fc) {
+  const o = gN * 9; G[o] = x; G[o + 1] = y; G[o + 2] = z; G[o + 3] = nx; G[o + 4] = ny; G[o + 5] = nz; G[o + 6] = c; G[o + 7] = k; G[o + 8] = fc; gN++;
+}
+// Sample a surface f(t,s)->[x,y,z] and emit points with finite-difference normals.
+function surface(f, tN, sN, tMax, color) {
+  const dt = 1 / tN, ds = 2 / sN;
+  for (let i = 1; i <= tN; i++) {
+    const t = i * dt; if (t > tMax) break;
+    for (let j = 0; j <= sN; j++) {
+      const s = -1 + j * ds;
+      const p = f(t, s), a = f(t - dt * .5, s), b = f(t, s + .05);
+      const n = cross([p[0] - a[0], p[1] - a[1], p[2] - a[2]], [b[0] - p[0], b[1] - p[1], b[2] - p[2]]);
+      const c = color(t, s);
+      emit(p[0], p[1], p[2], n[0], n[1], n[2], c[0], c[1], -1);
+    }
+  }
+}
+function bez(p0, p1, p2, u) {
+  const a = (1 - u) * (1 - u), b = 2 * (1 - u) * u, c = u * u;
+  return [a * p0[0] + b * p1[0] + c * p2[0], a * p0[1] + b * p1[1] + c * p2[1], a * p0[2] + b * p1[2] + c * p2[2]];
+}
+function leaf(o, ang, len, rise, grow, w0) {
+  const dx = Math.cos(ang), dz = Math.sin(ang), px = -dz, pz = dx;
+  surface((t, s) => {
+    const h = len * .62 * Math.pow(t, 1.25), y = len * rise * (t - .55 * t * t);
+    const w = w0 * Math.sin(Math.PI * Math.pow(t, .7)) * (1 - .3 * t);
+    const twist = s * w * .35 * t;
+    return [o[0] + dx * h + px * s * w, o[1] + y + twist - s * s * w * .25, o[2] + dz * h + pz * s * w];
+  }, 44, 8, grow, (t, s) => [9, .85 + .15 * (1 - Math.abs(s))]);
+}
+
+function build(T) {
+  gN = 0;
+  // base leaves
+  for (const L of LEAVES) {
+    const g = ease((T - L.t0) / 2.2);
+    if (g > 0) leaf([Math.cos(L.ang) * .06, BASE, Math.sin(L.ang) * .06], L.ang, L.len, L.rise, g, .075);
+  }
+  for (const F of FLOWERS) {
+    const gS = ease((T - F.stemT) / 2.1);
+    if (gS <= 0) continue;
+    const L = F.s, A = F.A, U = F.U, V = F.V;
+    const p0 = [F.x * .1, BASE, F.z * .1], p1 = [F.x * .45, -.7, F.z * .45];
+    const p2 = [F.x - A[0] * .05, F.y - A[1] * .05, F.z - A[2] * .05];
+    for (let u = 0; u <= gS; u += .004) {
+      const p = bez(p0, p1, p2, u);
+      emit(p[0], p[1], p[2], 0, 0, 1, 8, .75, 9);
+      emit(p[0] + .012, p[1], p[2] + .012, 0, 0, 1, 8, .6, 9);
+    }
+    if (gS > F.leafU + .1) {
+      const o = bez(p0, p1, p2, F.leafU);
+      leaf(o, F.leafSide, F.leafLen, .9, ease((gS - F.leafU) / .5), .045);
+    }
+    const gb = ease((T - F.budT) / .9);
+    if (gb <= 0) continue;
+    const bb = ease((T - F.bloomT) / 2.6);
+    const top = bez(p0, p1, p2, gS);
+    const cx = top[0], cy = top[1], cz = top[2];
+    const len = L * (.35 + .65 * gb);
+    for (let p = 0; p < 6; p++) {
+      const a = p * Math.PI / 3 + F.rot, ca = Math.cos(a), sa = Math.sin(a);
+      const D = [U[0] * ca + V[0] * sa, U[1] * ca + V[1] * sa, U[2] * ca + V[2] * sa];
+      const P = [-U[0] * sa + V[0] * ca, -U[1] * sa + V[1] * ca, -U[2] * sa + V[2] * ca];
+      const wide = p % 2 ? .25 : .2;
+      surface((t, s) => {
+        const e = .05 + bb * (.5 + .55 * Math.pow(t, 2)) + (p % 2 ? .06 : 0) * bb;
+        const r = len * t * (.72 + .28 * bb);
+        const w = len * wide * Math.pow(Math.sin(Math.PI * Math.pow(t, .8)), .9) * (1 - .3 * t) * (.4 + .6 * bb);
+        const rad = r * Math.sin(e), up = r * Math.cos(e) - s * s * w * .4 * (.3 + bb);
+        return [cx + D[0] * rad + P[0] * s * w + A[0] * up, cy + D[1] * rad + P[1] * s * w + A[1] * up, cz + D[2] * rad + P[2] * s * w + A[2] * up];
+      }, 40, 18, 1, (t, s) => {
+        if (bb < .2) return [t < .55 ? 12 : F.c, .8];
+        if (t < .2) return [F.c + 1, 1];
+        if (bb > .4 && Math.abs(s) < .14 && t < .85) return [F.c + 1, .95];
+        if (bb > .5 && t < .6 && Math.abs(s) < .55 && hash(p, Math.round(t * 26), Math.round(s * 7)) < .07) return [F.c + 1, .7];
+        return [F.c, .95 + .2 * (1 - Math.abs(s))];
+      });
+    }
+    if (bb > .55) {
+      const k = (bb - .55) / .45;
+      for (let m = 0; m < 6; m++) {
+        const a = m * Math.PI / 3 + F.rot + .5, sp = .32;
+        const d = norm([A[0] + (Math.cos(a) * U[0] + Math.sin(a) * V[0]) * sp, A[1] + (Math.cos(a) * U[1] + Math.sin(a) * V[1]) * sp, A[2] + (Math.cos(a) * U[2] + Math.sin(a) * V[2]) * sp]);
+        const sl = L * .62 * k;
+        for (let t = 0; t <= 1; t += .04) {
+          const tip = t > .88;
+          emit(cx + d[0] * sl * t, cy + d[1] * sl * t - .04 * t * t, cz + d[2] * sl * t, 0, 0, 1, tip ? 10 : 11, tip ? .85 : .7, tip ? 5 : 0);
+        }
+      }
+    }
+  }
+}
+
+// ---------- rendering ----------
+const cv = document.querySelector('canvas'), ctx = cv.getContext('2d');
+let W, H, dpr, cols, rows, cw, chh, zb, cb, kb, buckets;
+const STARS = Array.from({ length: 140 }, () => [Math.random(), Math.random(), Math.random() * 6.28, Math.random() < .15]);
+function resize() {
+  dpr = Math.min(devicePixelRatio || 1, 2); W = innerWidth; H = innerHeight;
+  cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  cols = Math.max(88, Math.min(220, Math.round(W / 4.3))); cw = W / cols; chh = cw * 1.5; rows = Math.ceil(H / chh);
+  zb = new Float32Array(cols * rows); cb = new Int8Array(cols * rows); kb = new Int16Array(cols * rows);
+  buckets = Array.from({ length: PAL.length * LEVELS }, () => []);
+}
+addEventListener('resize', resize); resize();
+
+const LIGHT = norm([-.45, .55, .75]);
+let yaw = .4, spin = 0, dragging = false, lastX = 0;
+function render(T, now) {
+  ctx.fillStyle = '#050507'; ctx.fillRect(0, 0, W, H);
+  ctx.font = `600 ${chh * 1.02}px Menlo, ui-monospace, monospace`; ctx.textBaseline = 'top';
+  for (const [sx, sy, ph, big] of STARS) {
+    ctx.fillStyle = `rgba(245,240,232,${.12 + .22 * (.5 + .5 * Math.sin(now / 900 + ph))})`;
+    ctx.fillText(big ? '+' : '.', sx * W, sy * H);
+  }
+  if (T == null) return;
+  if (!(T > DONE && builtDone)) { build(T); builtDone = T > DONE; }
+  zb.fill(1e9); cb.fill(-1);
+  const D = 6, fit = Math.min(W * .96 / 2.9, H * .64 / 3.1) * D, ox = W / 2, oy = H * .4;
+  const cyw = Math.cos(yaw), syw = Math.sin(yaw), pit = -.3, cp = Math.cos(pit), sp = Math.sin(pit);
+  for (let i = 0; i < gN; i++) {
+    const o = i * 9;
+    let x = G[o], y = G[o + 1] + .45, z = G[o + 2];
+    const X = x * cyw + z * syw, Z0 = -x * syw + z * cyw;
+    const Y = y * cp - Z0 * sp, Z = y * sp + Z0 * cp;
+    const d = D + Z;
+    const gx = ((ox + X * fit / d) / cw) | 0, gy = ((oy - Y * fit / d) / chh) | 0;
+    if (gx < 0 || gy < 0 || gx >= cols || gy >= rows) continue;
+    const k = gy * cols + gx;
+    if (d >= zb[k]) continue;
+    zb[k] = d;
+    let lum;
+    if (G[o + 8] >= 0) { lum = G[o + 7]; cb[k] = G[o + 8]; }
+    else {
+      const nx = G[o + 3], ny = G[o + 4], nz = G[o + 5];
+      const NX = nx * cyw + nz * syw, NZ0 = -nx * syw + nz * cyw, NY = ny * cp - NZ0 * sp, NZ = ny * sp + NZ0 * cp;
+      const nl = Math.hypot(NX, NY, NZ) || 1;
+      lum = (.38 + .72 * Math.abs((NX * LIGHT[0] + NY * LIGHT[1] + NZ * LIGHT[2]) / nl)) * G[o + 7];
+      cb[k] = Math.min(8, Math.max(0, Math.round(lum * 9 - .5)));
+    }
+    kb[k] = G[o + 6] * LEVELS + Math.min(LEVELS - 1, Math.max(0, Math.round(lum * (LEVELS - 1))));
+  }
+  for (const b of buckets) b.length = 0;
+  for (let k = 0; k < cb.length; k++) if (cb[k] >= 0) buckets[kb[k]].push(k);
+  for (let bi = 0; bi < buckets.length; bi++) {
+    const list = buckets[bi]; if (!list.length) continue;
+    ctx.fillStyle = STYLE[(bi / LEVELS) | 0][bi % LEVELS];
+    for (const k of list) {
+      const c = cb[k];
+      ctx.fillText(c === 9 ? '|' : RAMP[c], (k % cols) * cw, ((k / cols) | 0) * chh);
+    }
+  }
+}
+
+// ---------- message ----------
+const msgEl = document.getElementById('msg'), again = document.getElementById('again');
+let chars = [];
+function layoutMsg() {
+  msgEl.innerHTML = ''; chars = [];
+  readMsg().split('\n').forEach((line, li) => {
+    if (li) msgEl.appendChild(document.createElement('br'));
+    let italic = false;
+    line.split(/(\*)/).forEach(part => {
+      if (part === '*') { italic = !italic; return; }
+      if (italic) {
+        const w = document.createElement('em'); w.className = 'w';
+        for (const ch of part) { const s = document.createElement('span'); s.className = 'ch'; s.textContent = ch; w.appendChild(s); chars.push(s); }
+        msgEl.appendChild(w); return;
+      }
+      part.split(/( )/).forEach(word => {
+        if (!word) return;
+        if (word === ' ') { msgEl.appendChild(document.createTextNode(' ')); return; }
+        const w = document.createElement('span'); w.className = 'w';
+        for (const ch of word) { const s = document.createElement('span'); s.className = 'ch'; s.textContent = ch; w.appendChild(s); chars.push(s); }
+        msgEl.appendChild(w);
+      });
+    });
+  });
+}
+layoutMsg();
+addEventListener('hashchange', layoutMsg);
+
+// ---------- timeline ----------
+const MSG_AT = 8.2, CHAR_MS = 55;
+let t0 = null;
+function start() {
+  t0 = performance.now();
+  chars.forEach(c => c.classList.remove('on'));
+  again.classList.remove('on');
+}
+document.getElementById('tap').addEventListener('click', e => {
+  e.currentTarget.style.opacity = 0; e.currentTarget.style.pointerEvents = 'none'; start();
+});
+again.addEventListener('click', start);
+
+cv.addEventListener('pointerdown', e => { dragging = true; lastX = e.clientX; spin = 0; });
+addEventListener('pointermove', e => { if (!dragging) return; const dx = e.clientX - lastX; lastX = e.clientX; yaw += dx * .008; spin = dx * .008; });
+addEventListener('pointerup', () => dragging = false);
+
+let prev = performance.now();
+function frame(now) {
+  const dt = Math.min(.05, (now - prev) / 1000); prev = now;
+  const T = t0 == null ? null : (now - t0) / 1000;
+  if (!dragging) { spin *= .95; yaw += spin + dt * .2; }
+  render(T, now);
+  if (T != null && T > MSG_AT) {
+    const n = Math.floor((T - MSG_AT) * 1000 / CHAR_MS);
+    for (let i = 0; i < Math.min(n, chars.length); i++) chars[i].classList.add('on');
+    if (n > chars.length + 30) again.classList.add('on');
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
